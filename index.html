@@ -1213,22 +1213,48 @@ body{background:
   /* ---------- 桌面端也支持（鼠标等价指针） ---------- */
   skyCv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
-  /* ---------- 背景音乐（♪ 按钮：爱心/星空两场景通用，默认不自动播放） ---------- */
+  /* ---------- 背景音乐：打开网页直接放歌（♪ 按钮可随时暂停/恢复，两场景通用） ---------- */
   (function initMusic() {
     var audio = document.getElementById('bgMusic');
     var btn = document.getElementById('musicBtn');
     if (!audio || !btn) return;
     var icon = btn.querySelector('.mIcon');
+    var unlocked = false;               // 是否已成功起播过一次
     function setIcon(playing) { icon.textContent = playing ? '❚❚' : '♪'; }
-    function toggle() {
-      if (audio.paused) { audio.play().catch(function () {}); }
-      else { audio.pause(); }
+    function tryPlay() {
+      var pr = audio.play();
+      if (pr && pr.then) pr.catch(function () {});
     }
-    btn.addEventListener('click', toggle);
-    audio.addEventListener('play', function () { btn.classList.add('playing'); setIcon(true); });
+    /* 打开网页直接放歌：
+       根因——音乐是内嵌 base64（5.4MB），页面加载瞬间音频还没解码好（readyState 低），
+       此时 play() 会失败，所以旧版"不被拦截也要点一下"才响。
+       现在：显式 load() 触发解码 + 轮询等待 readyState>=2 + canplay/load 事件兜底，
+       音频一就绪就自动播放（重试到成功，约 24s 封顶）；不被拦截的环境全程无需点击。 */
+    audio.load();
+    var autoTries = 0;
+    function autoStart() {
+      if (unlocked || autoTries > 120) return;
+      if (audio.readyState >= 2) { autoTries++; tryPlay(); }
+      setTimeout(autoStart, 200);
+    }
+    setTimeout(autoStart, 150);
+    audio.addEventListener('canplay', function () { if (!unlocked && audio.paused) tryPlay(); });
+    window.addEventListener('load', function () { if (!unlocked && audio.paused) tryPlay(); });
+    /* 兜底：若浏览器拦截自动播放，首次点屏幕任意位置即起播（点 ♪ 按钮本身除外） */
+    document.addEventListener('pointerdown', function (ev) {
+      if (unlocked || !audio.paused) return;
+      if (btn.contains(ev.target)) return;
+      tryPlay();
+    });
+    /* ♪ 按钮随时可手动暂停/恢复 */
+    btn.addEventListener('click', function () {
+      if (audio.paused) { tryPlay(); }
+      else { audio.pause(); }
+    });
+    audio.addEventListener('play', function () { unlocked = true; btn.classList.add('playing'); setIcon(true); });
     audio.addEventListener('pause', function () { btn.classList.remove('playing'); setIcon(false); });
     setIcon(false);
-  })();
+  })();;;
 
   /* ---------- ?debug 调试钩子（正常访问不启用） ---------- */
   if (/[?&]debug/.test(location.search)) {
